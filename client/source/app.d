@@ -22,7 +22,6 @@ void main()
 		enum udp_count = 1_00_000;
 		TickDuration[n] times;
 		TickDuration last = TickDuration.from!"seconds"(0);
-		int errors = 0;
 		foreach(i; 0..n)
 		{
 			logInfo("attempt: %s", i);
@@ -30,18 +29,12 @@ void main()
 			for(int k=0; k<udp_count; k++){
 				//sleep(dur!"msecs"(1));
 				yield();
-				try{
-					udp_sender.send(payload);
-				}catch(Exception we){
-					k--;
-					errors++;
-					logError("%s", we);
-				}
+				udp_sender.send(payload);
 			}
 
 			sw.stop();  //stop/pause measuring.
 			//Return value of peek() after having stopped are the always same.
-			logInfo("%s times done, lap time: %s[ms], errors: %s; speed: %s", (i + 1) * udp_count, sw.peek().msecs, errors, (1000.0f*(i + 1) * udp_count/sw.peek().msecs));
+			logInfo("%s times done, lap time: %s[ms], speed: %s", (i + 1) * udp_count, sw.peek().msecs, (1000.0f*(i + 1) * udp_count/sw.peek().msecs));
 			times[i] = sw.peek() - last;
 			last = sw.peek();
 		}
@@ -52,7 +45,7 @@ void main()
 		foreach(t; times)
 			sum += t.msecs;
 
-		logInfo("Average time: %s msecs; errors: %s", sum/n, errors);
+		logInfo("Average time: %s msecs;", sum/n);
 		exitEventLoop();
 	});
 	logInfo("runEventLoop");

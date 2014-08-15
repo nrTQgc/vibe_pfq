@@ -1,0 +1,10 @@
+{
+	"name": "vibe_pfq",
+	"description": "A simple vibe.d server application.",
+	"copyright": "Copyright © 2014, nikolay",
+	"authors": ["nikolay"],
+	"dependencies": {
+		"vibe-d": {"path": "../vibe.d", "version": "~vibe_pfq"}
+	},
+	"versions": ["VibeCustomMain"]
+}

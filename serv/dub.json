@@ -6,5 +6,7 @@
 	"dependencies": {
 		"vibe-d": {"path": "../../vibe.d", "version": "~vibe_pfq"}
 	},
-	"versions": ["VibeDefaultMain"]
+	"versions": ["VibeDefaultMain"],
+        "subConfigurations": { "vibe-d": "libevent-pfq" }
+
 }

@@ -1,11 +1,48 @@
 
 interface IpNetwork{
+	ubyte[] getPayloadUdp(ubyte[] buffer);
+	ubyte[] fillUdpPacket(ubyte[] buffer, size_t payload_len, ip_v4 src, ushort src_port, ip_v4 dest, ushort dst_port);
 }
 
 alias ubyte[6] mac_type;
 enum mac_type NO_MAC = [0];
 alias uint ip_v4;
 alias ubyte[16] ip_v6;
+
+struct EthernetPacket{
+	align (1):
+	mac_type dest;
+	mac_type src;
+	ushort type;
+}
+
+struct Ip4Packet{
+	align (1):
+	union{
+		ubyte ip_version;
+		ubyte header_length;
+	}
+	ubyte services_field;
+	ushort total_length;
+	ushort identification;
+	union{
+		ubyte flags;
+		ushort fragment_offset;
+	}
+	ubyte time_to_live;
+	ubyte protocol;
+	ushort header_checksum;
+	uint source;
+	uint dest;
+}
+
+struct UdpIp4Packet{
+	align (1):
+	ushort src_port;
+	ushort dst_port;
+	ushort length;
+	ushort checksum;
+}
 
 struct NetDev{
 	string name;
@@ -18,11 +55,31 @@ struct NetDev{
 	ip_v4 gateway_ip;
 	ip_v4 net_mask;
 	mac_type[ip_v4] arp_table;
+
+	this(ip_v4 _net_mask, ip_v4 _gateway_ip){
+		net_mask = _net_mask;
+		gateway_ip = _gateway_ip;
+	}
+
+	bool is_ip_local(ip_v4 ip){
+		ip_v4 net = gateway_ip & net_mask;
+		return ((ip ^ net) & net_mask) == 0;
+	}
+
+	unittest{
+		auto n = NetDev();
+		n.net_mask = 0x00FFFFFF;
+		n.gateway_ip = 0x0102000A;
+		assert(n.is_ip_local(0x0102000A));
+		assert(n.is_ip_local(0x0802000A));
+		assert(!n.is_ip_local(0x0802000B));
+	}
 }
 
 version(linux){
-
+	import std.socket: InternetAddress;
 	import std.stdio;
+	import std.exception;
 	import std.array;
 	import std.string;
 	import std.algorithm;
@@ -34,6 +91,8 @@ version(linux){
 	import core.sys.posix.netdb;
 	import std.conv;
 
+	alias InternetAddress.parse parseIpDot;
+
 	void main(){
 		auto net = new LinuxIpNetwork();
 		writefln("dev: %s", net.network[0].gateway_ip);
@@ -43,7 +102,14 @@ version(linux){
 	class LinuxIpNetwork: IpNetwork{
 		private{
 			NetDev[] network;
+
+			this(NetDev[] network){
+				this.network = network;
+			}
 		}
+		enum MultiCastNet = NetDev(parseIpHex("224.0.0.0"), uint.max);
+		enum BroadCastNet = NetDev(parseIpHex("255.255.255.255"), uint.max);
+		enum LocalhostNet = NetDev(parseIpHex("127.0.0.0"), uint.max);
 
 		this(){
 			network = detect();
@@ -51,6 +117,111 @@ version(linux){
 			fillGatewayInfo(network);
 		}
 
+		override ubyte[] getPayloadUdp(ubyte[] buffer){
+			return buffer[(EthernetPacket.sizeof + Ip4Packet.sizeof + UdpIp4Packet.sizeof) .. $];
+		}
+
+		override ubyte[] fillUdpPacket(ubyte[] buffer, size_t _payload_len, ip_v4 src, ushort src_port, ip_v4 dest, ushort dst_port){
+			assert(_payload_len<=ushort.max);
+			ushort payload_len = cast(ushort)_payload_len;
+			mac_type dest_mac, src_mac;
+			NetDev *cur;
+			//todo support: 0.0.0.0 as source, multicat, broadcast, ...
+			foreach(NetDev dev; network){
+				if(dev.is_ip_local(dest)){
+					dest_mac = dev.arp_table[dest];
+				}
+				if(dev.ip == src){
+					src_mac = dev.mac;
+					cur = &dev;
+				}
+			}
+			if(dest_mac == NO_MAC && cur!=null){
+				dest_mac = cur.gateway_mac;
+			}
+
+			EthernetPacket *pck = cast(EthernetPacket*)buffer.ptr;
+
+			pck.src = src_mac;
+			pck.dest = dest_mac;
+			pck.type = htons(0x0800);
+			ubyte[] ip_raw = buffer[EthernetPacket.sizeof .. $];
+			Ip4Packet* ip = cast(Ip4Packet*)ip_raw;
+			static assert(Ip4Packet.sizeof==20);
+			ip.ip_version = 0x45; //version 4 and header length 20 
+			ip.services_field = 0;
+			ip.total_length = htons(cast(ushort)(payload_len + 20 + 8));
+			ip.identification = 0;//?todo?
+			ip.flags = 0x02; //don't fragment
+			ip.fragment_offset = 0;
+			ip.time_to_live = 0x40;
+			ip.protocol = 0x11;
+			ip.source = htonl(src);
+			ip.dest = htonl(dest);
+			ip.header_checksum = 0;
+			ip.header_checksum = htons(checksum_head_ip4(cast(ubyte*)ip, 20));
+
+			ubyte[] udp_raw = ip_raw[Ip4Packet.sizeof .. $];
+			UdpIp4Packet* udp = cast(UdpIp4Packet*)udp_raw;
+			static assert(UdpIp4Packet.sizeof==8);
+			udp.dst_port = htons(dst_port);
+			udp.src_port = htons(src_port);
+			udp.length = htons(cast(ushort)(UdpIp4Packet.sizeof + payload_len));
+			ubyte[] data = udp_raw[UdpIp4Packet.sizeof .. $];
+			enforce(data.length >= payload_len);
+			udp.checksum = 0;//todo
+			return buffer[0 .. (EthernetPacket.sizeof + Ip4Packet.sizeof + UdpIp4Packet.sizeof + payload_len)];
+		}
+
+	}
+	ushort checksum_head_ip4(ubyte *data, uint length){
+		uint tmp = 0;
+		for(int i=0; i<length; i+=2){
+			tmp += (data[i]<<8) + data[i+1];
+		}
+		auto p1 = tmp >> 16;
+		auto p2 = tmp & 0x0ffff;
+		return cast(ushort) (~ (p1+p2) );
+	}
+
+	unittest{
+		ubyte[] test = cast(ubyte[])x"4500 0073 0000 4000 4011 0000 c0a8 0001 c0a8 00c7";
+		assert(test.length==20);
+		auto rs = checksum_head_ip4(cast(ubyte*)test.ptr, 20);
+		assert(rs==0xb861);
+	}
+
+
+	unittest{
+		NetDev dev = NetDev();
+		dev.name = "test";
+		dev.mac = [0,1,2,3,4,1];
+		dev.ip = parseIpDot("10.0.2.30");
+		dev.hostname = "test.host";
+		
+		dev.gateway_mac = [0,1,2,3,4,2];
+		dev.gateway_ip = parseIpDot("10.0.2.1");
+		dev.net_mask = parseIpDot("10.0.2.0"); 
+		auto localIp = parseIpDot("10.0.2.2");
+		auto globalIp = parseIpDot("8.8.8.8");
+		dev.arp_table[localIp] = [0,1,2,3,4,3];
+
+		auto net = new LinuxIpNetwork([dev]);
+		ubyte[] buffer = new ubyte[2048];
+		ubyte[] payload = new ubyte[1024];
+		net.fillUdpPacket(buffer, payload.length, dev.ip, 2000, localIp, 8000);
+		assert(buffer[0 .. 6] == dev.arp_table[localIp]);
+		buffer = buffer[6 .. $];
+		assert(buffer[0 .. 6] == dev.mac);
+		buffer = buffer[6 .. $];
+		assert(*(cast(ushort*)(buffer[0 .. 2].ptr)) == htons(0x0800));
+		buffer = buffer[2 .. $];
+		assert(buffer[0] == 0x45);
+		buffer = buffer[1 .. $];
+
+		buffer[] = 0;
+		net.fillUdpPacket(buffer, payload.length, dev.ip, 2000, globalIp, 8000);
+		assert(buffer[0 .. 6] == dev.gateway_mac);
 	}
 /*
  * Port from  https://raw.githubusercontent.com/ajrisi/lsif/master/lsif.c
@@ -196,14 +367,14 @@ version(linux){
 			mac_type[ip_v4] empty;
 			dev.arp_table = empty;
 		}
-		import std.socket: InternetAddress;
+
 		foreach(line; arpTable.byLine){
 			auto a = line.split();
 			if(a[3]=="00:00:00:00:00:00") continue;
 			auto devName = a[5];
 			auto idx = devices.countUntil!((a,b) => a.name == b)(devName);
 			auto mac = parseMac(a[3]);
-			auto ip = InternetAddress.parse(a[0]);
+			auto ip = parseIpDot(a[0]);
 			devices[idx].arp_table[ip] = mac;
 		}
 	}
@@ -226,14 +397,14 @@ version(linux){
 			auto idx = devices.countUntil!((a,b) => a.name == b)(devName);
 			if(flags&2){
 				//gateway
-				devices[idx].gateway_ip = parseIp(gatewayIp4);
+				devices[idx].gateway_ip = parseIpHex(gatewayIp4);
 			}else if (strMask != "00000000"){
-				devices[idx].net_mask = parseIp(strMask);
+				devices[idx].net_mask = parseIpHex(strMask);
 			}
 		}
 	}
 
-	static auto parseIp(const char[] s){
+	static auto parseIpHex(const char[] s){
 		ip_v4 ip;
 		string tmp = s.idup;
 		for(int i=0; i<4; i++){
@@ -245,7 +416,7 @@ version(linux){
 	}
 	
 	unittest{
-		auto ip = parseIp("0102000A");
+		auto ip = parseIpHex("0102000A");
 		writefln("ip: %s", ip);
 		import std.socket: InternetAddress;
 		assert(ip == InternetAddress.parse("10.0.2.1"));

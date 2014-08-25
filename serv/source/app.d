@@ -11,7 +11,8 @@ shared static this()
 		auto udp_listener = listenUDP(1234);
 		for (int i =0; true; i++) {
 			auto pack = udp_listener.recv();
-			if(i%10_000==0) logInfo("Got packets count: %s", i);
+			//if(i%10_000==0) 
+				logInfo("Got packets count: %s", i);
 		}
 	});
 

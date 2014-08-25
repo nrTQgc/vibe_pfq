@@ -6,7 +6,7 @@ void main()
 	// returns false if a help screen has been requested and displayed (--help)
 	if (!finalizeCommandLineOptions())
 		return;
-	lowerPrivileges();
+	//lowerPrivileges();
 
 	//setLogLevel(LogLevel.trace);
 	runTask({
@@ -15,11 +15,11 @@ void main()
 		auto payload = new ubyte[500];//cast(ubyte[])"Hello, World!\r\n";
 		auto udp_sender = listenUDP(0);
 		//udp_sender.connect("10.0.2.129", 1234);
-		udp_sender.connect("127.0.0.1", 1234);
+		udp_sender.connect("10.0.2.129", 1234);
 
 		StopWatch sw;
-		enum n = 10;
-		enum udp_count = 1_00_000;
+		enum n = 1;
+		enum udp_count = 10;
 		TickDuration[n] times;
 		TickDuration last = TickDuration.from!"seconds"(0);
 		foreach(i; 0..n)

@@ -9,6 +9,7 @@ shared static this()
 {
 	runTask({
 		auto udp_listener = listenUDP(1234);
+		logInfo("start");
 		for (int i =0; true; i++) {
 			auto pack = udp_listener.recv();
 			//if(i%10_000==0) 

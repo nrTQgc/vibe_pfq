@@ -16,18 +16,19 @@ void main()
 			logInfo("start send udp packets");
 			auto payload = new ubyte[500];//cast(ubyte[])"Hello, World!\r\n";//
 			import vibe.core.drivers.libpfq: PFQUDPConnection;
-			auto udp_sender = cast(PFQUDPConnection) listenUDP(0xc2d5);
-			if(udp_sender is null){
+			auto udp_sender =  listenUDP(0xc2d5);
+			if(auto pfqCon = cast(PFQUDPConnection)udp_sender){
+				//udp_sender.batchSize = 5;
+			}else{
 				logError("No pfq connection :(");
-				return;
 			}
 			//udp_sender.connect("127.0.0.1", 1234);
 			udp_sender.connect("10.0.2.251", 1234);
-			udp_sender.batchSize = 5;
+
 
 			StopWatch sw;
 			enum n = 1;
-			enum udp_count = 10;
+			enum udp_count = 10_000;
 			TickDuration[n] times;
 			TickDuration last = TickDuration.from!"seconds"(0);
 			foreach(i; 0..n)
@@ -37,7 +38,11 @@ void main()
 				for(int k=0; k<udp_count; k++){
 					//sleep(dur!"msecs"(1));
 					yield();
+					(cast(uint*)payload.ptr) = k;
 					udp_sender.send(payload);
+					if(auto pfqCon = cast(PFQUDPConnection)udp_sender){
+						logInfo("error: %s, %s", pfqCon.getLastPFQError(), (pfqCon.getLastPFQError()=="NULL"));
+					}
 				}
 
 				sw.stop();  //stop/pause measuring.
@@ -52,8 +57,12 @@ void main()
 			// (seconds, msecs, usecs, hnsecs)
 			foreach(t; times)
 				sum += t.msecs;
+			if(auto pfqCon = cast(PFQUDPConnection)udp_sender){
+				logInfo("Average time: %s msecs; error: %s", sum/n, pfqCon.getLastPFQError());
+			}else{
+				logInfo("Average time: %s msecs", sum/n);
+			}
 
-			logInfo("Average time: %s msecs; error: %s", sum/n, udp_sender.getLastPFQError());
 		}catch(Exception e){
 			logError("%s", e);
 		}

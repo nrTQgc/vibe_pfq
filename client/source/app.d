@@ -18,7 +18,7 @@ void main()
 			import vibe.core.drivers.libpfq: PFQUDPConnection;
 			auto udp_sender =  listenUDP(0xc2d5);
 			if(auto pfqCon = cast(PFQUDPConnection)udp_sender){
-				//udp_sender.batchSize = 5;
+				//pfqCon.batchSize = 1000;
 			}else{
 				logError("No pfq connection :(");
 			}
@@ -38,11 +38,13 @@ void main()
 				for(int k=0; k<udp_count; k++){
 					//sleep(dur!"msecs"(1));
 					yield();
-					(cast(uint*)payload.ptr) = k;
+					uint* ptr = (cast(uint*)payload.ptr);
+					*ptr = k;
 					udp_sender.send(payload);
-					if(auto pfqCon = cast(PFQUDPConnection)udp_sender){
-						logInfo("error: %s, %s", pfqCon.getLastPFQError(), (pfqCon.getLastPFQError()=="NULL"));
-					}
+					/*if(auto pfqCon = cast(PFQUDPConnection)udp_sender){
+						auto err = pfqCon.getLastPFQError();
+						if(err!="NULL") logInfo("error: %s, %s", err);
+					}*/
 				}
 
 				sw.stop();  //stop/pause measuring.

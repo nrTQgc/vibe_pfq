@@ -7,5 +7,5 @@
 		"vibe-d": {"path": "../../vibe.d", "version": "~vibe_pfq"}
 	},
 	"versions": ["VibeCustomMain"],
-        "subConfigurations": { "vibe-d": "libevent-pfq" }
+        "subConfigurations": { "vibe-d": "libevent-netmap" }
 }

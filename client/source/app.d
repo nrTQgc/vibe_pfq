@@ -59,3 +59,22 @@ void main()
 	runEventLoop();
 }
 
+/+ todo
+/* set the thread affinity. */
+static int setaffinity(pthread_t me, int i) {
+    cpuset_t cpumask;
+
+    if (i == -1)
+        return 0;
+
+    /* Set thread affinity affinity. */
+    CPU_ZERO(&cpumask);
+    CPU_SET(i, &cpumask);
+
+    if (pthread_setaffinity_np(me, sizeof(cpuset_t), &cpumask) != 0) {
+        D("Unable to set affinity");
+        return 1;
+    }
+    return 0;
+}
++/
